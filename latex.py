@@ -7,6 +7,12 @@ from cuckoo.common.exceptions import CuckooReportError
 
 #global tab = "\indent"
 
+# To do
+# Add slashes \ to override underscores _ in API names
+# Add families check along with references check (Works the same way)
+# Start working on cool looking process tree
+# File access timeline
+
 class Latex(Report):
 
      def add_title(self, results):
@@ -80,7 +86,7 @@ class Latex(Report):
                for kid in node['children']:
                     rec_notes += " " + str(kid['pid'])
                     kid_info = self.rec_tree(kid)
-                    notes_list += kid_info
+                    notes_list.extend(kid_info)
                rec_notes += "\n\n"
                notes_list.append(rec_notes)
           except:
@@ -98,15 +104,15 @@ class Latex(Report):
                tree_notes += "\label{Process Tree}\n"
                proc_tree = results['behavior']['processtree']
                for node in proc_tree:
-#                    tree_list.append(self.rec_tree(node))
-#               for item in tree_list:
-#                    tree_notes += item
-                    pid = node['pid']
+                    tree_list.extend(self.rec_tree(node))
+               for item in tree_list:
+                    tree_notes += item
+#                    pid = node['pid']
 #                    kids = []
-                    tree_notes += "Process " + str(pid) + " had kids"
-                    for kid in node['children']:
-                         tree_notes += " " + str(kid['pid'])
-                    tree_notes += "\n\n"
+#                    tree_notes += "Process " + str(pid) + " had kids"
+#                    for kid in node['children']:
+#                         tree_notes += " " + str(kid['pid'])
+#                    tree_notes += "\n\n"
           except:
                raise CuckooReportError("Other sig issue: ", sys.exec_info()[0])
           finally:
