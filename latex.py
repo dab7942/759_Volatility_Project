@@ -92,9 +92,14 @@ class Latex(Report):
      def rec_tree(self, node):
           rec_notes = ""
           try:
-               rec_notes += "\nchild{node[roundnode]{" + str(node['pid']) + "}"
+               proc_name = self.fix_underscores(node['process_name'])
+               blurb = str(node['pid']) + r"\\" + proc_name
+               rec_notes += "\nchild{node[roundnode]{" + blurb + "}"
+               rec_notes += "[level distance=width(\"" + blurb + "\")]"
+#               proc_name = self.fix_underscores(node['process_name'])
+#               blurb = str(node['pid']) + "\n" + str(proc_name)
                for kid in node['children']:
-                    rec_notes += rec_tree(kid)
+                    rec_notes += self.rec_tree(kid)
                rec_notes += "}"
           except:
                raise CuckooReportError("Rec tree issue: ", sys.exec_info()[0])
@@ -112,9 +117,11 @@ class Latex(Report):
                for node in proc_tree:
                     tree_notes += "\\begin{tikzpicture}"
                     style = "{circle,draw=black,fill=white,minimum size=4mm}"
+                    node_def = "roundnode/.style="
+                    node_def += style
                     proc_name = self.fix_underscores(node['process_name'])
-                    blurb = str(node['pid']) + "\n" + str(proc_name)
-                    tree_notes += "[roundnode/.style=" + style + "]\n"
+                    blurb = str(node['pid']) + r"\\" + proc_name
+                    tree_notes += "[" + node_def + ", align=center]\n"
                     tree_notes += "\\node[roundnode]{" + blurb + "}\n"
                     tree_notes += "[level distance=width(\"" + blurb + "\")]"
                     for kid in node['children']:
@@ -122,7 +129,7 @@ class Latex(Report):
                     tree_notes += ";\n"
                     tree_notes += "\end{tikzpicture}\n"
           except:
-               raise CuckooReportError("Other sig issue: ", sys.exec_info()[0])
+               raise CuckooReportError("Proc tree issue: ", sys.exec_info()[0])
           finally:
                return tree_notes
 
