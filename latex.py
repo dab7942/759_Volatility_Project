@@ -15,6 +15,13 @@ sample = ""
 # Maybe improve process tree somehow?
 # Gotta find something else
 
+# OK Regkey stuff is working close enough to good for now
+# Wednesday, improve it to check for all possible activity keys
+# And then do the same thing for file activity
+
+# Notes from Wednesday
+# Regkey seems to be working properly
+# Transfer code into Files at next opportunity
 
 # THESE THINGS ARE DONE
 # Improve API call graphs by fixing alignment & adding Title/Header
@@ -34,6 +41,18 @@ class Latex(Report):
                     fixed += bit
                     fixed += "\_"
                fixed = fixed[0:-2]
+          else:
+               fixed = broke
+          return fixed
+
+     def fix_slash(self, broke):
+          slash = broke.find("\\")
+          fixed = ""
+          if slash != -1:
+               splits = broke.split("\\")
+               for bit in splits:
+                    fixed += bit
+                    fixed += " \\textbackslash "
           else:
                fixed = broke
           return fixed
@@ -179,7 +198,7 @@ class Latex(Report):
                     shade = float(100*count/num_sec)
                     pe_notes += base_shape.format(shade, top, top-height)
                     count += 1
-                    core_text = "{" + sec['name'] + "}"
+                    core_text = "{" + self.fix_slash(sec['name']) + "}"
                     pe_notes += base_text.format(top-0.5, core_text) + "\n"
                     top -= height
                pe_notes += "\end{tikzpicture}"
@@ -261,9 +280,95 @@ class Latex(Report):
                graph += "\end{axis}\n\end{tikzpicture}\n"
                call_notes += graph
           except:
-               raise CuckooReportError("Other sig issue: ", sys.exec_info()[0])
+               raise CuckooReportError("API issue: ", sys.exec_info()[0])
           finally:
                return call_notes
+
+     def fileactivity(self, results):
+          file_notes = ""
+          try:
+               file_notes += ""
+               file_notes += "\section{File System Activity}\n"
+               file_notes += "\label{File System Activity}\n"
+               file_notes += "\\begin{center}\n"
+               file_notes += "\\begin{longtable}{||p{0.3\linewidth} c c c c||}\n"
+               file_notes += "\hline\n"
+               file_notes += "File & Exists & Opened & Read & Written \\\\ \n"
+               file_notes += "\hline\hline\n"
+               file_notes += "Filler & filler & fiiier & fillier & full\\\\ \n"
+               file_notes += "\hline\n"
+               summary = results['behavior']['summary']
+               if summary.has_key("file_exists"):
+                    for afile in summary["file_exists"]:
+                         afile2 = self.fix_slash(afile)
+                         afile2 = self.fix_underscores(afile2)
+                         file_notes += afile2 + " & yes"
+                         for key in ["file_opened", "file_read", "file_written"]:
+                              if summary.has_key(key) and afile in summary[key]:
+                                   file_notes += " & yes"
+                              else:
+                                   file_notes += " & no"
+                         file_notes += " \\\\ \n \hline\n"
+               file_notes += "\end{longtable}\n"
+               file_notes += "\end{center}\n"
+          except:
+               raise CuckooReportError("Files issue: ", sys.exec_info()[0])
+          finally:
+               return file_notes
+
+     def regactivity(self, results):
+          reg_notes = ""
+          try:
+               reg_notes += ""
+               reg_notes += "\section{Registry Activity}\n"
+               reg_notes += "\label{Registry Activity}\n"
+               summary = results['behavior']['summary']
+               reg_keys = []
+               used_keys = []
+               for key in summary:
+                    if "regkey_" in key:
+                         reg_keys.append(key)
+               count = len(reg_keys)
+               used = len(used_keys)
+               if count == 0:
+                    reg_notes += "There was no registry activity."
+                    return reg_notes
+               reg_notes += "\\begin{center}\n"
+               reg_notes += "\\begin{longtable}"
+               reg_notes += "{||p{0.7\linewidth}" + " c"*count + "||}\n"
+               reg_notes += "\hline\n"
+               reg_notes += "Registry "
+               for key in reg_keys:
+                    reg_notes += "& " + str(key[7:]) + " "
+               reg_notes += "\\\\ \n \hline\hline\n"
+               reg_notes += "Filler " + "& full"*count + "\\\\ \n"
+               reg_notes += "\hline\n"
+               while len(reg_keys) > 0:
+                    count = len(reg_keys)
+                    used = len(used_keys)
+                    current = reg_keys[0]
+                    reg_keys = reg_keys[1:]
+                    for reg in summary[current]:
+                         seen = False
+                         for key in used_keys:
+                              if reg in summary[key]:
+                                   seen = True
+                         if not seen:
+                              reg2 = self.fix_underscores(self.fix_slash(reg))
+                              reg_notes += reg2 + " & no"*used + " & yes"
+                         for key in reg_keys:
+                              if reg in summary[key]:
+                                   reg_notes += " & yes"
+                              else:
+                                   reg_notes += " & no"
+                         reg_notes += "\\\\ \n \hline\n"
+                    used_keys.append(current)
+               reg_notes += "\end{longtable}\n"
+               reg_notes += "\end{center}\n"
+          except:
+               raise CuckooReportError("Registry issue: ", sys.exec_info()[0])
+          finally:
+               return reg_notes
 
      # This does things
      # Attempt to do a thing
@@ -276,6 +381,7 @@ class Latex(Report):
                whole_doc += "\usepackage{tikz}\n"
                whole_doc += "\usepackage[a4paper, margin=1in]{geometry}\n"
                whole_doc += "\usepackage{pgfplots}\n"
+               whole_doc += "\usepackage{longtable}\n"
                whole_doc += self.add_title(results)
                whole_doc += "\\begin{document}\n"
                whole_doc += "\maketitle\n"
@@ -297,6 +403,8 @@ class Latex(Report):
                whole_doc += self.tree(results)
                whole_doc += self.pe_sec(results)
                whole_doc += self.apicalls(results, apis)
+               whole_doc += self.fileactivity(results)
+               whole_doc += self.regactivity(results)
 # This is the very last thing to add
                whole_doc += "\end{document}"
                alt_file_path = os.path.join(self.reports_path, "latex.txt")
