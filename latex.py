@@ -23,6 +23,12 @@ sample = ""
 # Regkey seems to be working properly
 # Transfer code into Files at next opportunity
 
+# Notes from Thursday
+# Found the problem with filesystem
+# file_copied is a list of both the og file and the copied one
+# Fixed by concattenating them into one
+# But will need to fix how I check for them in the backwards and forwards check
+
 # THESE THINGS ARE DONE
 # Improve API call graphs by fixing alignment & adding Title/Header
   # This should be solved
@@ -53,6 +59,18 @@ class Latex(Report):
                for bit in splits:
                     fixed += bit
                     fixed += " \\textbackslash "
+          else:
+               fixed = broke
+          return fixed
+
+     def fix_percent(self, broke):
+          percent = broke.find("%")
+          fixed = ""
+          if percent != -1:
+               splits = broke.split("%")
+               for bit in splits:
+                    fixed += bit
+                    fixed += "\%"
           else:
                fixed = broke
           return fixed
@@ -220,7 +238,7 @@ class Latex(Report):
                     graph += "title={Most common calls for " + str(proc) + "}"
                     graph += ", nodes near coords, "
                     graph += "nodes near coords align={vertical}, "
-                    graph += "xtick=data, xticklabel style={rotate=-90},"
+                    graph += "xticklabel style={rotate=-90},"
                     coords = "symbolic x coords={"
                     plots = "\\addplot coordinates {"
                     redplots = "\\addplot[ybar,fill=red] coordinates {"
@@ -253,10 +271,10 @@ class Latex(Report):
                graph += "title={Most common calls overall}"
                graph += ", nodes near coords, "
                graph += "nodes near coords align={vertical}, "
-               graph += "xtick=data, xticklabel style={rotate=-90},"
+               graph += "xticklabel style={rotate=-90},"
                coords = "symbolic x coords={"
                plots = "\\addplot coordinates {"
-               redplots = "\\addplot[ybar,fill=red] coordinates {"
+               redplots = "\\addplot[fill=red] coordinates {"
                calls = []
                counts = []
                for key in totals:
@@ -290,27 +308,74 @@ class Latex(Report):
                file_notes += ""
                file_notes += "\section{File System Activity}\n"
                file_notes += "\label{File System Activity}\n"
-               file_notes += "\\begin{center}\n"
-               file_notes += "\\begin{longtable}{||p{0.3\linewidth} c c c c||}\n"
-               file_notes += "\hline\n"
-               file_notes += "File & Exists & Opened & Read & Written \\\\ \n"
-               file_notes += "\hline\hline\n"
-               file_notes += "Filler & filler & fiiier & fillier & full\\\\ \n"
-               file_notes += "\hline\n"
                summary = results['behavior']['summary']
-               if summary.has_key("file_exists"):
-                    for afile in summary["file_exists"]:
-                         afile2 = self.fix_slash(afile)
-                         afile2 = self.fix_underscores(afile2)
-                         file_notes += afile2 + " & yes"
-                         for key in ["file_opened", "file_read", "file_written"]:
-                              if summary.has_key(key) and afile in summary[key]:
-                                   file_notes += " & yes"
-                              else:
-                                   file_notes += " & no"
-                         file_notes += " \\\\ \n \hline\n"
+               file_keys = []
+               used_keys = []
+               for key in summary:
+                    if "file_" in key:
+                         file_keys.append(key)
+               count = len(file_keys)
+               used = len(used_keys)
+               if count == 0:
+                    file_notes += "There was no filesystem activity.\n"
+                    return file_notes
+               file_notes += "\\begin{center}\n"
+               file_notes += "\\begin{longtable}"
+               w = str(1-count/10.0)
+               file_notes += "{||p{" + w + "\linewidth}" + " c"*count + "||}\n"
+               file_notes += "\hline\n"
+               file_notes += "File"
+               for key in file_keys:
+                    file_notes += " & " + str(key[5:])
+               file_notes += " \\\\ \n \hline\hline\n"
+#               reg_notes += "Filler " + "& full"*count + "\\\\ \n"
+#               reg_notes += "\hline\n"
+               while len(file_keys) > 0:
+                    count = len(file_keys)
+                    used = len(used_keys)
+                    current = file_keys[0]
+                    file_keys = file_keys[1:]
+                    for fle in summary[current]:
+                         if current == "file_copied":
+                              fle = fle[0] + " aka " + fle[1]
+                         seen = False
+                         for key in used_keys:
+                              if fle in summary[key]:
+                                   seen = True
+                         if not seen:
+                              fle2 = self.fix_underscores(self.fix_slash(fle))
+                              file_notes += fle2 + " & no"*used + " & yes"
+                              for key in file_keys:
+                                   if fle in summary[key]:
+                                        file_notes += " & yes"
+                                   else:
+                                        file_notes += " & no"
+                              file_notes += "\\\\ \n \hline\n"
+                    used_keys.append(current)
                file_notes += "\end{longtable}\n"
                file_notes += "\end{center}\n"
+
+#               file_notes += "\\begin{center}\n"
+#               file_notes += "\\begin{longtable}{||p{0.3\linewidth} c c c c||}\n"
+#               file_notes += "\hline\n"
+#               file_notes += "File & Exists & Opened & Read & Written \\\\ \n"
+#               file_notes += "\hline\hline\n"
+#               file_notes += "Filler & filler & fiiier & fillier & full\\\\ \n"
+#               file_notes += "\hline\n"
+##               summary = results['behavior']['summary']
+#               if summary.has_key("file_exists"):
+#                    for afile in summary["file_exists"]:
+#                         afile2 = self.fix_slash(afile)
+#                         afile2 = self.fix_underscores(afile2)
+#                         file_notes += afile2 + " & yes"
+#                         for key in ["file_opened", "file_read", "file_written"]:
+#                              if summary.has_key(key) and afile in summary[key]:
+#                                   file_notes += " & yes"
+#                              else:
+#                                   file_notes += " & no"
+#                         file_notes += " \\\\ \n \hline\n"
+#               file_notes += "\end{longtable}\n"
+#               file_notes += "\end{center}\n"
           except:
                raise CuckooReportError("Files issue: ", sys.exec_info()[0])
           finally:
@@ -331,18 +396,19 @@ class Latex(Report):
                count = len(reg_keys)
                used = len(used_keys)
                if count == 0:
-                    reg_notes += "There was no registry activity."
+                    reg_notes += "There was no registry activity.\n"
                     return reg_notes
                reg_notes += "\\begin{center}\n"
                reg_notes += "\\begin{longtable}"
-               reg_notes += "{||p{0.7\linewidth}" + " c"*count + "||}\n"
+               w = str(1-count/10.0)
+               reg_notes += "{||p{"+ w + "\linewidth}" + " c"*count + "||}\n"
                reg_notes += "\hline\n"
                reg_notes += "Registry "
                for key in reg_keys:
                     reg_notes += "& " + str(key[7:]) + " "
                reg_notes += "\\\\ \n \hline\hline\n"
-               reg_notes += "Filler " + "& full"*count + "\\\\ \n"
-               reg_notes += "\hline\n"
+#               reg_notes += "Filler " + "& full"*count + "\\\\ \n"
+#               reg_notes += "\hline\n"
                while len(reg_keys) > 0:
                     count = len(reg_keys)
                     used = len(used_keys)
@@ -354,13 +420,15 @@ class Latex(Report):
                               if reg in summary[key]:
                                    seen = True
                          if not seen:
-                              reg2 = self.fix_underscores(self.fix_slash(reg))
+                              reg2 = self.fix_slash(reg)
+                              reg2 = self.fix_underscores(reg2)
+                              reg2 = self.fix_percent(reg2)
                               reg_notes += reg2 + " & no"*used + " & yes"
-                         for key in reg_keys:
-                              if reg in summary[key]:
-                                   reg_notes += " & yes"
-                              else:
-                                   reg_notes += " & no"
+                              for key in reg_keys:
+                                   if reg in summary[key]:
+                                        reg_notes += " & yes"
+                                   else:
+                                        reg_notes += " & no"
                          reg_notes += "\\\\ \n \hline\n"
                     used_keys.append(current)
                reg_notes += "\end{longtable}\n"
