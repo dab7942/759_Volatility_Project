@@ -311,8 +311,10 @@ class Latex(Report):
                summary = results['behavior']['summary']
                file_keys = []
                used_keys = []
+               if "file_copied" in summary:
+                    file_keys.append("file_copied")
                for key in summary:
-                    if "file_" in key:
+                    if "file_" in key and key != "file_copied":
                          file_keys.append(key)
                count = len(file_keys)
                used = len(used_keys)
@@ -328,8 +330,6 @@ class Latex(Report):
                for key in file_keys:
                     file_notes += " & " + str(key[5:])
                file_notes += " \\\\ \n \hline\hline\n"
-#               reg_notes += "Filler " + "& full"*count + "\\\\ \n"
-#               reg_notes += "\hline\n"
                while len(file_keys) > 0:
                     count = len(file_keys)
                     used = len(used_keys)
@@ -340,42 +340,40 @@ class Latex(Report):
                               fle = fle[0] + " aka " + fle[1]
                          seen = False
                          for key in used_keys:
-                              if fle in summary[key]:
-                                   seen = True
+                              if key == "file_copied":
+                                   masterlist = []
+                                   for pair in summary[key]:
+                                        masterlist += pair
+                                   if fle in masterlist:
+                                        seen = True
+                              else:
+                                   if fle in summary[key]:
+                                        seen = True
                          if not seen:
                               fle2 = self.fix_underscores(self.fix_slash(fle))
                               file_notes += fle2 + " & no"*used + " & yes"
                               for key in file_keys:
-                                   if fle in summary[key]:
-                                        file_notes += " & yes"
+                                   if current == "file_copied":
+                                        spot = fle.find(" aka ")
+                                        one = fle[:spot]
+                                        two = fle[spot+5:]
+                                        seen = False
+                                        for afl in [one, two]:
+                                             if afl in summary[key]:
+                                                  seen = True
+                                        if seen:
+                                             file_notes += " & yes"
+                                        else:
+                                             file_notes += " & no"
                                    else:
-                                        file_notes += " & no"
+                                        if fle in summary[key]:
+                                             file_notes += " & yes"
+                                        else:
+                                             file_notes += " & no"
                               file_notes += "\\\\ \n \hline\n"
                     used_keys.append(current)
                file_notes += "\end{longtable}\n"
                file_notes += "\end{center}\n"
-
-#               file_notes += "\\begin{center}\n"
-#               file_notes += "\\begin{longtable}{||p{0.3\linewidth} c c c c||}\n"
-#               file_notes += "\hline\n"
-#               file_notes += "File & Exists & Opened & Read & Written \\\\ \n"
-#               file_notes += "\hline\hline\n"
-#               file_notes += "Filler & filler & fiiier & fillier & full\\\\ \n"
-#               file_notes += "\hline\n"
-##               summary = results['behavior']['summary']
-#               if summary.has_key("file_exists"):
-#                    for afile in summary["file_exists"]:
-#                         afile2 = self.fix_slash(afile)
-#                         afile2 = self.fix_underscores(afile2)
-#                         file_notes += afile2 + " & yes"
-#                         for key in ["file_opened", "file_read", "file_written"]:
-#                              if summary.has_key(key) and afile in summary[key]:
-#                                   file_notes += " & yes"
-#                              else:
-#                                   file_notes += " & no"
-#                         file_notes += " \\\\ \n \hline\n"
-#               file_notes += "\end{longtable}\n"
-#               file_notes += "\end{center}\n"
           except:
                raise CuckooReportError("Files issue: ", sys.exec_info()[0])
           finally:
@@ -407,8 +405,6 @@ class Latex(Report):
                for key in reg_keys:
                     reg_notes += "& " + str(key[7:]) + " "
                reg_notes += "\\\\ \n \hline\hline\n"
-#               reg_notes += "Filler " + "& full"*count + "\\\\ \n"
-#               reg_notes += "\hline\n"
                while len(reg_keys) > 0:
                     count = len(reg_keys)
                     used = len(used_keys)
@@ -467,7 +463,6 @@ class Latex(Report):
                whole_doc += "signatures, process tree .\n"
                (sigs, apis) = self.sig_analysis(results)
                whole_doc += sigs
-#               whole_doc += self.sig_analysis(results)
                whole_doc += self.tree(results)
                whole_doc += self.pe_sec(results)
                whole_doc += self.apicalls(results, apis)
