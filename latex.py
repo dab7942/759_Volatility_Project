@@ -5,52 +5,12 @@ from datetime import date
 from cuckoo.common.abstracts import Report
 from cuckoo.common.exceptions import CuckooReportError
 
-#global tab = "\indent"
-
 sample = ""
-
-# To do
-# File access timeline
-  # Found the right place to find this info. Start on code tomorrow.
-# Maybe improve process tree somehow?
-# Gotta find something else
-
-# OK Regkey stuff is working close enough to good for now
-# Wednesday, improve it to check for all possible activity keys
-# And then do the same thing for file activity
-
-# Notes from Wednesday
-# Regkey seems to be working properly
-# Transfer code into Files at next opportunity
-
-# Notes from Thursday
-# Found the problem with filesystem
-# file_copied is a list of both the og file and the copied one
-# Fixed by concattenating them into one
-# But will need to fix how I check for them in the backwards and forwards check
-
-# THESE THINGS ARE DONE
-# Improve API call graphs by fixing alignment & adding Title/Header
-  # This should be solved
-# Added graph for overall stats
-# Consider adding additional function for graph gereration to offload code
-  # Actually this isn't possible since I need to build the overall stats
+sample_pure = ""
 
 class Latex(Report):
 
-     def fix_underscores(self, broke):
-          underscore = broke.find("_")
-          fixed = ""
-          if underscore != -1:
-               splits = broke.split("_")
-               for bit in splits:
-                    fixed += bit
-                    fixed += "\_"
-               fixed = fixed[0:-2]
-          else:
-               fixed = broke
-          return fixed
-
+# Function for putting slashes in a format Latex can use
      def fix_slash(self, broke):
           slash = broke.find("\\")
           fixed = ""
@@ -63,18 +23,24 @@ class Latex(Report):
                fixed = broke
           return fixed
 
-     def fix_percent(self, broke):
-          percent = broke.find("%")
+# Function to put various symbols into appropriate format for Latex
+     def fix_all(self, broke):
           fixed = ""
-          if percent != -1:
-               splits = broke.split("%")
-               for bit in splits:
-                    fixed += bit
-                    fixed += "\%"
-          else:
-               fixed = broke
+          for symbol in ["_", "%", "$"]:
+               fixed = ""
+               present = broke.find(symbol)
+               if present != -1:
+                    splits = broke.split(symbol)
+                    for bit in splits:
+                         fixed += bit
+                         if bit != splits[-1]:
+                              fixed += "\\" + symbol
+               else:
+                    fixed = broke + ""
+               broke = fixed + ""
           return fixed
 
+# Creates a title page for the report
      def add_title(self, results):
           title = ""
           try:
@@ -88,6 +54,8 @@ class Latex(Report):
           finally:
                return title
 
+# Extract the signature descriptions from the JSON
+# For certain sig types, extract additional info
      def sig_analysis(self, results):
           tab = "\indent "
           sig_notes = ""
@@ -95,10 +63,20 @@ class Latex(Report):
           try:
                sig_notes += "\section{Signatures}\n"
                sig_notes += "\label{Signatures}\n"
+               sig_notes += "This section outlines information about the"
+               sig_notes += " different signatures observed during sample"
+               sig_notes += " execution. These signatures are created by the"
+               sig_notes += " Cuckoo community, so make note of all of them."
+               sig_notes += "The description for each signature is given,"
+               sig_notes += " along with relevant 'marks', which provide more"
+               sig_notes += " details about what activity occurred.\n \\\\"
                for sig in results['signatures']:
                     sig_notes += "\\noindent "
                     sig_notes += "Description: " + sig['description'] + "\n\n"
                     calls = {}
+                    wmi = ""
+                    dns = ""
+                    dead = ""
                     refs = ""
                     fams = ""
                     for mark in sig['marks']:
@@ -106,6 +84,13 @@ class Latex(Report):
                               api = mark['call']['api']
                               calls[api] = calls.get(api, 0) + 1
                               apis.append(api)
+                         if mark['type'] == "ioc":
+                              if mark['category'] == 'wmi':
+                                   wmi += tab + tab + mark['ioc'] + "\n\n"
+                              elif mark['category'] == "dead_host":
+                                   dead += tab + tab + mark['ioc'] + "\n\n"
+                         if mark['type'] == "generic" & mark.has_key("host"):
+                              dns += tab + tab + mark['host'] + "\n\n"
                     for ref in sig['references']:
                          refs += tab + tab + ref + "\n\n"
                     for fam in sig['families']:
@@ -113,9 +98,18 @@ class Latex(Report):
                     if calls != {}:
                          sig_notes += tab + "Relevant API Calls\n\n"
                          for call, count in calls.items():
-                              call2 = self.fix_underscores(call)
+                              call2 = self.fix_all(call)
                               sig_notes += tab + tab + call2 + " was called "
                               sig_notes += str(count) + " times\n\n"
+                    if wmi != "":
+                         sig_notes += tab + "WMI Queries made\n\n"
+                         sig_notes += wmi
+                    if dns != "":
+                         sig_notes += tab + "DNS Queries made\n\n"
+                         sig_notes += dns
+                    if dead != "":
+                         sig_notes += tab + "Dead Connections made\n\n"
+                         sig_notes += dead
                     if refs != "":
                          sig_notes += tab + "For further info\n\n"
                          sig_notes += refs
@@ -129,28 +123,46 @@ class Latex(Report):
           finally:
                return (sig_notes, apis)
 
-     def rec_tree(self, node):
+# Recursive helper function for process tree generation
+     def rec_tree(self, node, red):
           rec_notes = ""
+          mal_procs = []
           try:
-               proc_name = self.fix_underscores(node['process_name'])
+               if red:
+                    mal_procs.append(node['pid'])
+               proc_name = self.fix_all(node['process_name'])
                blurb = str(node['pid']) + r"\\" + proc_name
                rec_notes += "\nchild{node[roundnode]{" + blurb + "}"
                rec_notes += "[level distance=width(\"" + blurb + "\")]"
+               sub_notes = ""
+               sub_procs = []
                for kid in node['children']:
-                    rec_notes += self.rec_tree(kid)
+                    (sub_notes, sub_procs) = self.rec_tree(kid, red)
+               rec_notes += sub_notes
+               mal_procs += sub_procs
                rec_notes += "}"
           except:
                raise CuckooReportError("Rec tree issue: ", sys.exec_info()[0])
           finally:
-               return rec_notes
-          
+               return (rec_notes, mal_procs)
 
+# Main function for process tree generation
      def tree(self, results):
           tree_notes = ""
+          mal_procs = []
           try:
                tree_notes += "\\newpage"
                tree_notes += "\section{Process Tree}\n"
                tree_notes += "\label{Process Tree}\n"
+               tree_notes += "This is a set of processes observed during"
+               tree_notes += " sample execution. The tree in red is the one"
+               tree_notes += " containing the sample. The tree in green is "
+               tree_notes += " lsass, which is responsible for starting the"
+               tree_notes += " sample execution. All other trees are in"
+               tree_notes += " orange. At some point additional functionality"
+               tree_notes += " may be added to identify definitively"
+               tree_notes += " malicious or benign trees, and color them"
+               tree_notes += " appropriately.\n\n"
                proc_tree = results['behavior']['processtree']
                for node in proc_tree:
                     tree_notes += "\\begin{tikzpicture}"
@@ -158,14 +170,22 @@ class Latex(Report):
                     grn = "{circle,draw=black,fill=green!50,minimum size=4mm},"
                     red = "{circle,draw=black,fill=red!50,minimum size=4mm},"
                     ng = "{circle,draw=black,fill=orange!50,minimum size=4mm},"
-                    proc_name = self.fix_underscores(node['process_name'])
+                    proc_name_pure = node['process_name']
+                    proc_name = self.fix_all(proc_name_pure)
                     if(proc_name[-4:] == ".exe"):
                          proc_name = proc_name[0:-4]
+                    if(proc_name_pure[-4:] == ".exe"):
+                         proc_name_pure = proc_name_pure[0:-4]
+                    proc_name = self.fix_all(node['process_name'])
                     global sample
+                    global sample_pure
                     node_def = ""
-                    if(proc_name == sample):
+                    is_sample = False
+                    if(proc_name_pure == sample_pure):
                          node_def = "roundnode/.style=" + red
-                    elif(proc_name == "lsass"):
+                         mal_procs.append(node['pid'])
+                         is_sample = True
+                    elif(proc_name_pure == "lsass"):
                          node_def = "roundnode/.style=" + grn
                     else:
                          node_def = "roundnode/.style=" + ng
@@ -173,21 +193,31 @@ class Latex(Report):
                     tree_notes += "[" + l1 + node_def + "align=center]\n"
                     tree_notes += "\\node[roundnode]{" + blurb + "}\n"
                     tree_notes += "[level distance=width(\"" + blurb + "\")]"
+                    sub_notes = ""
+                    sub_procs = []
                     for kid in node['children']:
-                         tree_notes += self.rec_tree(kid)
+                         (sub_notes, sub_procs) = self.rec_tree(kid, is_sample)
+                    tree_notes += sub_notes
+                    mal_procs += sub_procs
                     tree_notes += ";\n"
                     tree_notes += "\end{tikzpicture}\n"
           except:
                raise CuckooReportError("Proc tree issue: ", sys.exec_info()[0])
           finally:
-               return tree_notes
+               return (tree_notes, mal_procs)
 
+# Function for creating scale model of PE file
      def pe_sec(self, results):
           pe_notes = ""
           try:
                pe_notes += "\section{PE}\n"
                pe_notes += "\label{PE}\n"
-               pe_notes += "\\begin{tikzpicture}]\n"
+               pe_notes += "This section is a display of the sections of"
+               pe_notes += " the submitted sample. Each section is roughly"
+               pe_notes += " proportional in size to how large it is in the"
+               pe_notes += " file. This section is only for purposes of"
+               pe_notes += " understanding the file sections and layout.\n\n"
+               pe_notes += "\\begin{tikzpicture}\n"
                total_size = 0.0
                base_shape = "\\filldraw[fill=red!{:.2f}!green, draw=black]"
                base_shape += " (0,{:.2f}) rectangle (11,{:.2f});\n"
@@ -216,20 +246,34 @@ class Latex(Report):
                     shade = float(100*count/num_sec)
                     pe_notes += base_shape.format(shade, top, top-height)
                     count += 1
-                    core_text = "{" + self.fix_slash(sec['name']) + "}"
+                    core_text = "{" + self.fix_all(sec['name']) + "}"
                     pe_notes += base_text.format(top-0.5, core_text) + "\n"
                     top -= height
-               pe_notes += "\end{tikzpicture}"
+               pe_notes += "\end{tikzpicture}\n"
           except:
                raise CuckooReportError("Other sig issue: ", sys.exec_info()[0])
           finally:
                return pe_notes
 
+# Function for creating graphs of API call use by different processes
      def apicalls(self, results, badapis):
           call_notes = ""
           try:
                call_notes += "\section{API Calls}\n"
                call_notes += "\label{API Calls}\n"
+               call_notes += "This section is a series of graphs indicating"
+               call_notes += " the 5 most common API calls used by each"
+               call_notes += " process that was detected by cuckoo. API calls"
+               call_notes += " are how malware samples do a significant amount"
+               call_notes += " of their activity. These should be checked"
+               call_notes += " carefully for suspicious calls."
+               call_notes += " Red columns are APIs that appeared as part of a"
+               call_notes += " signature (See section 0.2). These should be"
+               call_notes += " treated with extra suspicious. The last graph"
+               call_notes += " is the most common API calls overall."
+               call_notes += " Additional functionality to identify"
+               call_notes += " potentially malicious API calls may be added"
+               call_notes += " at a later date.\n\n"
                stats = results['behavior']['apistats']
                totals = {}
                for proc in stats:
@@ -302,19 +346,80 @@ class Latex(Report):
           finally:
                return call_notes
 
-     def fileactivity(self, results):
+# Determine if row for file/reg activity needs to be red
+     def get_color(self, results, a_file, procs):
+          color = ""
+          try:
+               gen = results['behavior']['generic']
+               for proc in gen:
+                    if proc['pid'] in procs:
+                         for key in proc['summary']:
+                              if a_file in proc['summary'][key]:
+                                   color = "\\rowcolor{MyRed}\n"
+               if "aka" in a_file:
+                    spot = a_file.find(" aka ")
+                    one = a_file[:spot]
+                    two = a_file[spot+5:]
+                    for afl in [one, two]:
+                         for proc in gen:
+                              if proc['pid'] in procs:
+                                   for key in proc['summary']:
+                                        if afl in proc['summary'][key]:
+                                             color = "\\rowcolor{MyRed}\n"
+          except:
+               raise CuckooReportError("Coloring issue: ", sys.exec_info()[0])
+          finally:
+               return color
+
+# Unused function that determines all the processes that accessed a file/reg
+     def get_pids(self, results, a_file):
+          pids = []
+          try:
+               gen = results['behavior']['generic']
+               for proc in gen:
+                    for key in proc['summary']:
+                         if a_file in proc['summary'][key]:
+                              pids.append(proc['pid'])
+               if "aka" in a_file:
+                    spot = a_file.find(" aka ")
+                    one = a_file[:spot]
+                    two = a_file[spot+5:]
+                    for afl in [one, two]:
+                         for proc in gen:
+                              for key in proc['summary']:
+                                   if afl in proc['summary'][key]:
+                                        pids.append(proc['pid'])
+          except:
+               raise CuckooReportError("PID get issue: ", sys.exec_info()[0])
+          finally:
+               return pids
+
+# Creates table of accessed files & what actions were performed on them
+     def fileactivity(self, results, procs):
           file_notes = ""
           try:
                file_notes += ""
                file_notes += "\section{File System Activity}\n"
                file_notes += "\label{File System Activity}\n"
+               file_notes += "\definecolor{MyRed}{rgb}{0.95,0,0}\n"
+               file_notes += "This section outlines all the interactions"
+               file_notes += " processes made with the filesystem. This allows"
+               file_notes += " analysts to see activity with the same file"
+               file_notes += " spread across multiple processes. Additionally"
+               file_notes += " copied files have the activity for both their"
+               file_notes += " versions combined. Entries in red were"
+               file_notes += " handled by a process in the process tree"
+               file_notes += " containing the executed sample. These should"
+               file_notes += " be investigated further.\n\n"
                summary = results['behavior']['summary']
                file_keys = []
                used_keys = []
-               if "file_copied" in summary:
-                    file_keys.append("file_copied")
+               double_keys = ["file_copied", "file_moved"]
+               for key in double_keys:
+                    if key in summary:
+                         file_keys.append(key)
                for key in summary:
-                    if "file_" in key and key != "file_copied":
+                    if "file_" in key and key not in double_keys:
                          file_keys.append(key)
                count = len(file_keys)
                used = len(used_keys)
@@ -336,24 +441,28 @@ class Latex(Report):
                     current = file_keys[0]
                     file_keys = file_keys[1:]
                     for fle in summary[current]:
-                         if current == "file_copied":
+                         if current in double_keys:
                               fle = fle[0] + " aka " + fle[1]
                          seen = False
                          for key in used_keys:
-                              if key == "file_copied":
+                              if key in double_keys:
                                    masterlist = []
                                    for pair in summary[key]:
-                                        masterlist += pair
+                                        masterlist.append(pair[0])
+                                        masterlist.append(pair[1])
                                    if fle in masterlist:
                                         seen = True
                               else:
                                    if fle in summary[key]:
                                         seen = True
                          if not seen:
-                              fle2 = self.fix_underscores(self.fix_slash(fle))
+                              color = self.get_color(results, fle, procs)
+                              file_notes += color
+                              fle2 = self.fix_slash(fle)
+                              fle2 = self.fix_all(fle2)
                               file_notes += fle2 + " & no"*used + " & yes"
                               for key in file_keys:
-                                   if current == "file_copied":
+                                   if current in double_keys:
                                         spot = fle.find(" aka ")
                                         one = fle[:spot]
                                         two = fle[spot+5:]
@@ -379,12 +488,20 @@ class Latex(Report):
           finally:
                return file_notes
 
-     def regactivity(self, results):
+# Create table of accessed registries & what actions were performed on them
+     def regactivity(self, results, procs):
           reg_notes = ""
           try:
-               reg_notes += ""
                reg_notes += "\section{Registry Activity}\n"
                reg_notes += "\label{Registry Activity}\n"
+               reg_notes += "\definecolor{MyRed}{rgb}{0.95,0,0}\n"
+               reg_notes += "This section outlines all the interactions"
+               reg_notes += " processes made with the registry. This allows"
+               reg_notes += " analysts to see activity with the same registry"
+               reg_notes += " spread across multiple processes. Entries in red"
+               reg_notes += " were accessed by a process in the process tree"
+               reg_notes += " started by the sample. These should be"
+               reg_notes += " investigated further for changes.\n\n"
                summary = results['behavior']['summary']
                reg_keys = []
                used_keys = []
@@ -416,9 +533,10 @@ class Latex(Report):
                               if reg in summary[key]:
                                    seen = True
                          if not seen:
+                              color = self.get_color(results, reg, procs)
+                              reg_notes += color
                               reg2 = self.fix_slash(reg)
-                              reg2 = self.fix_underscores(reg2)
-                              reg2 = self.fix_percent(reg2)
+                              reg2 = self.fix_all(reg2)
                               reg_notes += reg2 + " & no"*used + " & yes"
                               for key in reg_keys:
                                    if reg in summary[key]:
@@ -434,18 +552,89 @@ class Latex(Report):
           finally:
                return reg_notes
 
-     # This does things
-     # Attempt to do a thing
+# Section documenting various network connections 
+     def network(self, results):
+          net_notes = ""
+          try:
+               net_notes += "\section{Network Activity}\n"
+               net_notes += "\label{Network Activity}\n"
+               net_notes += "This section outlines the network connections "
+               net_notes += "cuckoo observed during sample execution. These "
+               net_notes += "include tcp and udp connections, dns queries, "
+               net_notes += "dns servers, and websites visited. These should"
+               net_notes += " be investigated on a case-by-case basis.\n\n"
+               net_notes += "\\fbox{ \\begin{minipage}{15em}\n"
+               net_notes += "This is a list of IP addresses which a process"
+               net_notes += " tried to connect that cuckoo determined was "
+               net_notes += "'dead'. This means it is either no longer "
+               net_notes += "valid, or could not be reached. Having entries "
+               net_notes += "here is very often an inidicator of malware."
+               net_notes += "\\\\ \n"
+               hosts = []
+               for host in results['network']['dead_hosts']:
+                    if host[0] not in hosts:
+                         hosts.append(host[0])
+               for host in hosts:
+                    net_notes += host + "\n"
+               net_notes += "\end{minipage} }\n"
+               net_notes += "\\fbox{ \\begin{minipage}{15em}\n"
+               net_notes += "These are the IPs of DNS servers that were used"
+               net_notes += " for making DNS queries. These are not suspicious"
+               net_notes += " outright, but should still be noted. \\\\ \n"
+               for host in results['network']['dns_servers']:
+                    net_notes += host + "\n"
+               net_notes += "\end{minipage} }\n"
+               net_notes += "\\fbox{ \\begin{minipage}{15em}\n"
+               net_notes += "This section is a list of domains Cuckoo observed"
+               net_notes += " connections being made to. These likely need to"
+               net_notes += " be investigated, but do so carefully as they may"
+               net_notes += " be malicous. \\\\ \n"
+               for domain in results['network']['domains']:
+                    net_notes += domain['domain'] + "\n"
+               net_notes += "\end{minipage} }\n"
+               net_notes += "\\fbox{ \\begin{minipage}{15em}\n"
+               net_notes += "The following IPs made UDP connections with the"
+               net_notes += " Cuckoo VM. They are not suspicious outright, but"
+               net_notes += " should be used as a point of further"
+               net_notes += " investigation. \\\\ \n"
+               hosts = []
+               for host in results['network']['udp']:
+                    if host['dst'] not in hosts:
+                         hosts.append(host['dst'])
+               for host in hosts:
+                    net_notes += host + "\n"
+               net_notes += "\end{minipage} }\n"
+               net_notes += "\\fbox{ \\begin{minipage}{15em}\n"
+               net_notes += "The following IPs made TCP connections with the"
+               net_notes += " Cuckoo VM. They are not suspicious outright, but"
+               net_notes += " should be used as a point of further"
+               net_notes += " investigation. \\\\ \n"
+               hosts = []
+               for host in results['network']['tcp']:
+                    if host['dst'] not in hosts:
+                         hosts.append(host['dst'])
+               for host in hosts:
+                    net_notes += host + "\n"
+               net_notes += "\end{minipage} }\n"
+          except:
+               raise CuckooReportError("Network issue: ", sys.exec_info()[0])
+          finally:
+               return net_notes
+
+# Main function that builds the base of the report & calls the other functions
      def run(self, results):
           try:
                global sample
-               sample = self.fix_underscores(results['target']['file']['name'])
+               global sample_pure
+               sample_pure = results['target']['file']['name']
+               sample = self.fix_all(sample_pure)
                whole_doc = ""
                whole_doc += "\documentclass{report}\n"
                whole_doc += "\usepackage{tikz}\n"
                whole_doc += "\usepackage[a4paper, margin=1in]{geometry}\n"
                whole_doc += "\usepackage{pgfplots}\n"
                whole_doc += "\usepackage{longtable}\n"
+               whole_doc += "\usepackage{color, colortbl}\n"
                whole_doc += self.add_title(results)
                whole_doc += "\\begin{document}\n"
                whole_doc += "\maketitle\n"
@@ -456,19 +645,27 @@ class Latex(Report):
                whole_doc += "cuckoo sandbox report. This report came from "
                whole_doc += " executing a file called "
                whole_doc += str(sample) + " on a "
-               whole_doc += results['info']['machine']['manager'] + " VM. "
+               whole_doc += results['info']['machine']['manager'] + " VM "
+               time = results['info']['ended'] - results['info']['started']
+               time = time.total_seconds()
+               mins, sec = divmod(time, 60)
+               hour, mins = divmod(mins, 60)
+               strtime = "%d:%02d:%02d" % (hour, mins, sec)
+               whole_doc += "for " + strtime  + ". "
                whole_doc += "It was given a score of "
                whole_doc += str(results['info']['score']) + ". "
                whole_doc += "The sections are: "
-               whole_doc += "signatures, process tree .\n"
+               whole_doc += "signatures, process tree, PE File, API Calls, "
+               whole_doc += "File System Activity, Registry Activity.\n"
                (sigs, apis) = self.sig_analysis(results)
                whole_doc += sigs
-               whole_doc += self.tree(results)
+               (trees, procs) = self.tree(results)
+               whole_doc += trees
                whole_doc += self.pe_sec(results)
                whole_doc += self.apicalls(results, apis)
-               whole_doc += self.fileactivity(results)
-               whole_doc += self.regactivity(results)
-# This is the very last thing to add
+               whole_doc += self.fileactivity(results, procs)
+               whole_doc += self.regactivity(results, procs)
+               whole_doc += self.network(results)
                whole_doc += "\end{document}"
                alt_file_path = os.path.join(self.reports_path, "latex.txt")
                with open(alt_file_path, "w") as test_report:
